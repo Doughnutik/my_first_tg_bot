@@ -223,7 +223,7 @@ def get_sum(message, values):
         bot.reply_to(message, 'Я конечно не математик, но про натуральные числа слышал')
         bot.register_next_step_handler(message, get_sum, values)
         return
-    bot.send_message(message.chat.id, 'Укажите интересующую вас дату в формате ГГГГ-ММ-ДД. Если хочется конвертировать по текущему курсу, напишите today'
+    bot.send_message(message.chat.id, 'Укажите интересующую вас дату в формате ГГГГ-ММ-ДД. Если хочется конвертировать по текущему курсу, напишите today')
     bot.register_next_step_handler(message, get_date, values, sum)
     
 def get_date(message, values, sum):
