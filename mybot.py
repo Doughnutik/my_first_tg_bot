@@ -1,26 +1,62 @@
 import telebot
-import webbrowser
 from telebot import types
+import webbrowser
 import sqlite3
 import config
 import requests
 import json
-
 import os.path as op
 import urllib.request
 from datetime import date
-from currency_converter import ECB_URL, CurrencyConverter
-from currency_converter import currency_converter
+from currency_converter import ECB_URL, CurrencyConverter, currency_converter
 
-filename = f"ecb_{date.today():%Y%m%d}.zip"
-if not op.isfile(filename):
-    urllib.request.urlretrieve(ECB_URL, filename)
-currency = CurrencyConverter(filename)
+def init():
+    global currency, bot
+    conn = sqlite3.connect('mybot.db')
+    cur = conn.cursor()
+    cur.execute('CREATE TABLE IF NOT EXISTS users (id int auto increment primary key, user_id varchar(20), name varchar(100), username varchar(100))')
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    filename = f"ecb_{date.today():%Y%m%d}.zip"
+    if not op.isfile(filename):
+        urllib.request.urlretrieve(ECB_URL, filename)
+    currency = CurrencyConverter(filename)
+    
+    bot = telebot.TeleBot(config.BOT_TOKEN)
 
-bot = telebot.TeleBot(config.BOT_TOKEN)
+bot = None
+currency = None
+init()
+
+def check_registration(message):
+    conn = sqlite3.connect('mybot.db')
+    cur = conn.cursor()
+    cur.execute("SELECT rowid FROM users WHERE user_id = ?", (str(message.from_user.id),))
+    data = cur.fetchone()
+    return data
+
+@bot.message_handler(commands=['register'])
+def register(message):
+    if check_registration(message):
+        bot.send_message(message.chat.id, 'Я ценю твоё желание вступить в ряды, но в этом нет необходимости. Ты уже в них состоишь 😁')
+        return
+    conn = sqlite3.connect('mybot.db')
+    cur = conn.cursor()
+    user = message.from_user
+    cur.execute("INSERT INTO users (user_id, name, username) VALUES ('%s', '%s', '%s')" %
+    (user.id, user.first_name + ' ' + user.last_name, user.username))
+    conn.commit()
+    cur.close()
+    conn.close()
+    bot.send_message(message.chat.id, f'{user.first_name} {user.last_name}, Генерал Перепечко успешно добавил вас в ряды добровольцев. Да будет АРМИЯ!')
 
 @bot.message_handler(commands=['weather'])
 def get_weather(message):
+    if not check_registration(message):
+        bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+        return
     bot.reply_to(message, 'Укажите город, в котором вас интересует погода')
     bot.register_next_step_handler(message, get_city_weather)
 
@@ -44,8 +80,11 @@ def get_city_weather(message):
         
 @bot.message_handler(content_types=['voice'])
 def get_audio(message):
+    if not check_registration(message):
+        bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+        return
     markup = types.InlineKeyboardMarkup()
-    btn1 = types.InlineKeyboardButton('Перейти к генералу Перепечко', url='https://vuzopedia.ru/storage/app/uploads/public/646/729/192/6467291920247857574894.jpg')
+    btn1 = types.InlineKeyboardButton('Перейти к генералу Перепечко', url=config.PEREPECHKO_IMAGE)
     btn2 = types.InlineKeyboardButton('Удалить высказывание', callback_data='delete')
     btn3 = types.InlineKeyboardButton('Изменить высказывание', callback_data='edit')
     markup.row(btn1, btn2)
@@ -62,6 +101,9 @@ def callback_message(callback):
 
 @bot.message_handler(commands=['site'])
 def site(message):
+    if not check_registration(message):
+        bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+        return
     bot.send_message(message.chat.id, 'Введите нужный вам сайт (можно без https)')
     bot.register_next_step_handler(message, open_site)
     
@@ -75,74 +117,31 @@ def open_site(message):
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(message.chat.id, f'Приветствую тебя, солдат {message.from_user.first_name} {message.from_user.last_name}. На связи генерал Перепечко!')
-    file = open('sticker.webm', 'rb')
-    bot.send_sticker(message.chat.id, 'CAACAgIAAxkBAAJqJmWFSLn_grAMe0BdjQNCfJlr6k3ZAAIOFQACRAE5SsHbSRQzXgWqMwQ')
+    bot.send_sticker(message.chat.id, config.STICKER)
     file = open('video.mp4', 'rb')
+    bot.send_message(message.chat.id, 'Чтобы пользоваться функционалом бота, нужно зарегистрироваться. Ниже видео, как это сделать')
     bot.send_video(message.chat.id, file)
-
-@bot.message_handler(commands=['register'])
-def register(message):
-    conn = sqlite3.connect('mybot.db')
-    cur = conn.cursor()
-    
-    cur.execute('CREATE TABLE IF NOT EXISTS users (id int auto increment primary key, name varchar(50), password varchar(50))')
-    conn.commit()
-    cur.close()
-    conn.close()
-    
-    bot.send_message(message.chat.id, 'Введи имя для регистрации')
-    bot.register_next_step_handler(message, add_name_to_db)
-    
-def add_name_to_db(message):
-    name = message.text.strip()
-    
-    if name.lower() == 'perepechko' or name.lower() == 'перепечко':
-        bot.reply_to(message, 'Генерал всегда зарегистрирован. Вводи другое имя')
-        bot.register_next_step_handler(message, add_name_to_db)
-        return
-    conn = sqlite3.connect('mybot.db')
-    cur = conn.cursor()
-    cur.execute("SELECT rowid FROM users WHERE name = ?", (name,))
-    data = cur.fetchone()
-    if data:
-        bot.reply_to(message, 'Данный пользователь уже существует')
-        cur.close()
-        conn.close()
-        return
-    cur.close()
-    conn.close()
-    bot.send_message(message.chat.id, 'Введи пароль для регистрации')
-    bot.register_next_step_handler(message, add_password_to_db, name)
-    
-    
-def add_password_to_db(message, name):
-    password = message.text.strip()
-    conn = sqlite3.connect('mybot.db')
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users (name, password) VALUES ('%s', '%s')" % (name, password))
-    conn.commit()
-    cur.close()
-    conn.close()
-    
-    bot.send_message(message.chat.id, 'Успешно зарегистрирован')
     
 @bot.message_handler(commands=['delete'])
 def delete(message):
-    bot.send_message(message.chat.id, 'Введи пользователя, которого хотите удалить')
+    if message.from_user.id != config.ADMIN_ID:
+        bot.send_message(message.chat.id, 'Увы, но такое могут делать только генералы')
+        return
+    bot.send_message(message.chat.id, 'Введите username пользователя, которого хотите удалить. Собаку в начале указывать не нужно')
     bot.register_next_step_handler(message, delete_name_from_db)
     
 def delete_name_from_db(message):
-    name = message.text.strip()
     conn = sqlite3.connect('mybot.db')
     cur = conn.cursor()
-    cur.execute("SELECT rowid FROM users WHERE name = ?", (name,))
+    name = message.text.strip()
+    cur.execute("SELECT rowid FROM users WHERE username = ?", (name,))
     data = cur.fetchone()
     if not data:
         bot.reply_to(message, 'Данного пользователя не существует')
         cur.close()
         conn.close()
         return
-    cur.execute("DELETE FROM users WHERE name = ?", (name,))
+    cur.execute("DELETE FROM users WHERE username = ?", (name,))
     conn.commit()
     cur.close()
     conn.close()
@@ -152,24 +151,30 @@ def delete_name_from_db(message):
 def help(message):
     bot.send_message(message.chat.id, 'С какой стати генерал должен помогать какому-то солдатишке? И вообще, почему тебе кто-то должен помогать. Генерал Перепечко добивался всего сам, кровью и потом!!! Ты ни от кого не должен зависеть, ты взрослый бугай, огромный лоб с мозгами, так что быстро взял себя в руки, зарядился мотивацией и пошёл покорять этот мир!')
     
-@bot.message_handler(commands=['users'])
-def users(message):
-    conn = sqlite3.connect('mybot.db')
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM users')
-    users = cur.fetchall()
+# @bot.message_handler(commands=['users'])
+# def users(message):
+#     if not check_registration(message):
+#         bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+#         return
+#     conn = sqlite3.connect('mybot.db')
+#     cur = conn.cursor()
+#     cur.execute('SELECT * FROM users')
+#     users = cur.fetchall()
     
-    info = ''
-    for user in users:
-        info += f'Имя: {user[1]}, Пароль: {user[2]}\n'
+#     info = ''
+#     for user in users:
+#         info += f'Имя: {user[1]}, Пароль: {user[2]}\n'
     
-    cur.close()
-    conn.close()
+#     cur.close()
+#     conn.close()
     
-    bot.send_message(message.chat.id, info)
+#     bot.send_message(message.chat.id, info)
 
 @bot.message_handler(commands=['convert'])
 def convert(message):
+    if not check_registration(message):
+        bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+        return
     markup = types.InlineKeyboardMarkup(row_width=2)
     usd_eur_btn = types.InlineKeyboardButton('USD/EUR', callback_data='conv/USD/EUR')
     eur_usd_btn = types.InlineKeyboardButton('EUR/USD', callback_data='conv/EUR/USD')
