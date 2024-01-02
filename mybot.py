@@ -9,6 +9,8 @@ import os.path as op
 import urllib.request
 from datetime import date
 from currency_converter import ECB_URL, CurrencyConverter, currency_converter
+from time import sleep
+from random import choice
 
 def init():
     global currency, bot
@@ -37,6 +39,10 @@ def check_registration(message):
     data = cur.fetchone()
     return data
 
+def get_name_from_message(message):
+    user = message.from_user
+    return (user.first_name if user.first_name else '') + ' ' + (user.last_name if user.last_name else '')
+
 @bot.message_handler(commands=['register'])
 def register(message):
     if check_registration(message):
@@ -46,11 +52,11 @@ def register(message):
     cur = conn.cursor()
     user = message.from_user
     cur.execute("INSERT INTO users (user_id, name, username) VALUES ('%s', '%s', '%s')" %
-    (user.id, user.first_name + ' ' + user.last_name, user.username))
+    (user.id, get_name_from_message(message), user.username))
     conn.commit()
     cur.close()
     conn.close()
-    bot.send_message(message.chat.id, f'{user.first_name} {user.last_name}, Генерал Перепечко успешно добавил вас в ряды добровольцев. Да будет АРМИЯ!')
+    bot.send_message(message.chat.id, f'{get_name_from_message(message)}, Генерал Перепечко успешно добавил вас в ряды добровольцев. Да будет АРМИЯ!')
 
 @bot.message_handler(commands=['weather'])
 def get_weather(message):
@@ -116,7 +122,7 @@ def open_site(message):
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, f'Приветствую тебя, солдат {message.from_user.first_name} {message.from_user.last_name}. На связи генерал Перепечко!')
+    bot.send_message(message.chat.id, f'Приветствую тебя, солдат {get_name_from_message(message)}. На связи генерал Перепечко!')
     bot.send_sticker(message.chat.id, config.STICKER)
     file = open('video.mp4', 'rb')
     bot.send_message(message.chat.id, 'Чтобы пользоваться функционалом бота, нужно зарегистрироваться. Ниже видео, как это сделать')
@@ -151,24 +157,24 @@ def delete_name_from_db(message):
 def help(message):
     bot.send_message(message.chat.id, 'С какой стати генерал должен помогать какому-то солдатишке? И вообще, почему тебе кто-то должен помогать. Генерал Перепечко добивался всего сам, кровью и потом!!! Ты ни от кого не должен зависеть, ты взрослый бугай, огромный лоб с мозгами, так что быстро взял себя в руки, зарядился мотивацией и пошёл покорять этот мир!')
     
-# @bot.message_handler(commands=['users'])
-# def users(message):
-#     if not check_registration(message):
-#         bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
-#         return
-#     conn = sqlite3.connect('mybot.db')
-#     cur = conn.cursor()
-#     cur.execute('SELECT * FROM users')
-#     users = cur.fetchall()
+@bot.message_handler(commands=['users'])
+def users(message):
+    if not check_registration(message):
+        bot.send_message(message.chat.id, 'Сначала нужно зарегистрироваться')
+        return
+    conn = sqlite3.connect('mybot.db')
+    cur = conn.cursor()
+    cur.execute('SELECT name, username FROM users')
+    users = cur.fetchall()
     
-#     info = ''
-#     for user in users:
-#         info += f'Имя: {user[1]}, Пароль: {user[2]}\n'
+    info = ''
+    for user in users:
+        info += f'Имя: {user[0]}, Username: {user[1]}\n'
     
-#     cur.close()
-#     conn.close()
+    cur.close()
+    conn.close()
     
-#     bot.send_message(message.chat.id, info)
+    bot.send_message(message.chat.id, info)
 
 @bot.message_handler(commands=['convert'])
 def convert(message):
@@ -210,42 +216,79 @@ def get_sum(message, values):
     text = message.text.strip()
     if not text.isdigit():
         bot.reply_to(message, 'Некорректное значение, солдат. Чему тебя в школе вообще учили? Вводи ещё раз!')
-        bot.register_next_step_handler(message, get_sum)
+        bot.register_next_step_handler(message, get_sum, values)
         return
     sum = int(text)
     if sum <= 0:
         bot.reply_to(message, 'Я конечно не математик, но про натуральные числа слышал')
-        bot.register_next_step_handler(message, get_sum)
+        bot.register_next_step_handler(message, get_sum, values)
         return
-    bot.send_message(message.chat.id, 'Укажите интересующую вас дату в формате ГГГГ, ММ, ДД. Если хочется конвертировать по текущему курсу, напишите today')
+    bot.send_message(message.chat.id, 'Укажите интересующую вас дату в формате ГГГГ-ММ-ДД. Если хочется конвертировать по текущему курсу, напишите today'
     bot.register_next_step_handler(message, get_date, values, sum)
     
 def get_date(message, values, sum):
     text = message.text
-    need_date = f'{date.today():%Y%m%d}'
-    print(need_date)
+    need_date = date.today()
     if text.lower() != 'today':
-        need_date = date(text)
+        try:
+            need_date = date.fromisoformat(text)
+        except ValueError:
+            bot.send_message(message.chat.id, 'Указана неверная дата или не в том формате')
+            return
     try:
-        res = currency.convert(sum, values[0], values[1], date=date(need_date))
+        res = currency.convert(sum, values[0], values[1], date=need_date)
     except ValueError:
-        bot.send_message(message.chat.id, 'Генерал с похмелья не может выполнить данную операцию')
+        bot.send_message(message.chat.id, 'Генерал с похмелья не может выполнить данную операцию (хотя может ему подсунули кривые данные или этих валют просто нет в базе)')
     except currency_converter.RateNotFoundError:
-        last1 = currency.bounds[values[0]][1]
-        last2 = currency.bounds[values[1]][2]
-        
+        first1, last1 = currency.bounds[values[0]]
+        first2, last2 = currency.bounds[values[1]]
+        if need_date > min(last1, last2):
+            need_date = min(last1, last2)
+        elif need_date < max(first1, first2):
+            need_date = max(first1, first2)
+        else:
+            bot.send_message(message.chat.id, 'Увы, но данных по конвертации нет')
+            return
+        try:
+            res = currency.convert(sum, values[0], values[1], date=need_date)
+        except:
+            bot.send_message(message.chat.id, 'Увы, но данных по конвертации нет')
+        else:
+            bot.send_message(message.chat.id, f'Информация нашлась только по ближайшей дате {need_date}, результат обнала: {round(res, 2)}')
     else:
-        bot.send_message(message.chat.id, f'Результат обнала: {res}')
+        bot.send_message(message.chat.id, f'Результат обнала: {round(res, 2)}')
     
 @bot.message_handler()
 def info(message):
-    if message.text.lower() == 'привет':
+    low_text = message.text.lower()
+    if low_text == 'привет':
         bot.send_message(message.chat.id, f'{message.from_user.first_name} {message.from_user.last_name}, не привет, а здравия желаю!')
-    elif message.text.lower() == 'здравия желаю':
-        bot.send_message(message.chat.id, f'Так точно, {message.from_user.first_name} {message.from_user.last_name}. Да начнётся АРМИЯ!')
-    elif message.text.lower() == 'id':
+    elif low_text == 'здравия желаю':
+        bot.send_message(message.chat.id, f'Здравия желаю, товарищ генерал Перепечко')
+    elif message.text == 'Здравия желаю, товарищ генерал Перепечко':
+        bot.send_message(message.chat.id, f'Вижу, прогрессируешь не по дням, а по часам. Вот тебе парочку историй из моей бурной молодости.')
+        sleep(2)
+        file1 = open('meme_with_black.jpg', 'rb')
+        file2 = open('meme_with_money.jpg', 'rb')
+        bot.send_photo(message.chat.id, file1)
+        bot.send_photo(message.chat.id, file2)
+        bot.send_message(message.chat.id, config.JOKE)
+    elif low_text == 'id':
         bot.reply_to(message, message.from_user.id)
+    elif (low_text.find('извини') != -1 or low_text.find('прости') != -1 or low_text.find('прошу прощения') != -1 or 
+        low_text.find('приношу свои извинения') != -1 or low_text.find('каюсь') != -1 or low_text.find('был не прав') != -1 or
+        low_text.find('перегнул') != -1):
+        config.COUNT_FOR_ANGRY = 0
+        bot.send_message(message.chat.id, 'Ладно, прощаю глупца😏')
     else:
-        bot.send_message(message.chat.id, 'Сильное заявление, проверять я его, конечно, не буду')
+        if not config.COUNT_FOR_ANGRY:
+            bot.send_message(message.chat.id, 'Я понимаю, пылкий нрав, но в армии надо следить за словами. Попроси прощения, я забуду этот инцидент')
+        elif config.COUNT_FOR_ANGRY == 1:
+            bot.send_message(message.chat.id, 'Не перегибай палку, солдат, я ведь могу и рассердиться😠')
+        elif config.COUNT_FOR_ANGRY == 2:
+            bot.send_message(message.chat.id, 'Даю тебе последний шанс извиниться за свои высказывания, потом за себя не отвечаю😡')
+        else:
+            bot.send_message(message.chat.id, choice(config.PHRASES_FOR_ANSWER))
+        config.COUNT_FOR_ANGRY += 1
 
 bot.infinity_polling()
