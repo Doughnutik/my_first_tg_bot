@@ -71,7 +71,6 @@ def get_city_weather(message):
     result = requests.get(f'https://api.openweathermap.org/data/2.5/weather?q={city}&appid={config.API_WEATHER}&units=metric&lang=ru')
     if result.status_code == 200:
         data = json.loads(result.text)
-        print(data)
         bot.reply_to(message, f'''Погода в {city}:
 Температура: {data['main']['temp']} 
 Ощущается: {data['main']['feels_like']}
